@@ -3,6 +3,7 @@
 import argparse
 import sys
 
+from html_report import generate_empty_html_report, generate_html_report
 from parser import load_keyword_report
 from report import low_ctr_keywords, optimization_suggestions, wasted_spend_keywords
 
@@ -14,7 +15,10 @@ def main():
         description="Summarize Google Ads keyword performance and suggest optimizations."
     )
     arg_parser.add_argument("--file", required=True, help="Path to the keyword-performance CSV export")
-    arg_parser.add_argument("--output", help="Optional path to also save the report to a text file")
+    arg_parser.add_argument(
+        "--output",
+        help="Optional path to also save the report. Use a .html extension for a browser-viewable report.",
+    )
     args = arg_parser.parse_args()
 
     lines: list[str] = []
@@ -32,7 +36,10 @@ def main():
     if df.empty:
         emit("No data found in this report.")
         if args.output:
-            _write_report(args.output, lines)
+            if _is_html(args.output):
+                _write_html(args.output, generate_empty_html_report(args.file))
+            else:
+                _write_report(args.output, lines)
         return
 
     emit(f"Loaded {len(df)} keywords from {args.file}")
@@ -61,7 +68,11 @@ def main():
         emit(f"- {suggestion}")
 
     if args.output:
-        _write_report(args.output, lines)
+        if _is_html(args.output):
+            html_doc = generate_html_report(args.file, df, low_ctr_df, wasted_df, optimization_suggestions(df, low_ctr_df, wasted_df))
+            _write_html(args.output, html_doc)
+        else:
+            _write_report(args.output, lines)
 
 
 def emit_section(emit, title: str) -> None:
@@ -70,10 +81,20 @@ def emit_section(emit, title: str) -> None:
     emit("=" * len(title))
 
 
+def _is_html(path: str) -> bool:
+    return path.lower().endswith((".html", ".htm"))
+
+
 def _write_report(path: str, lines: list[str]) -> None:
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")
     print(f"\nReport saved to {path}")
+
+
+def _write_html(path: str, html_doc: str) -> None:
+    with open(path, "w") as f:
+        f.write(html_doc)
+    print(f"\nHTML report saved to {path} — open it with the Live Preview extension or in a browser.")
 
 
 if __name__ == "__main__":
