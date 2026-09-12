@@ -1,5 +1,8 @@
 """Loads a Google Ads keyword-performance CSV export into a pandas DataFrame."""
 
+import codecs
+import io
+
 import pandas as pd
 
 EXPECTED_COLUMNS = [
@@ -48,11 +51,63 @@ def _to_number(series: pd.Series) -> pd.Series:
     return pd.to_numeric(cleaned, errors="coerce")
 
 
+def _decode(raw: bytes) -> str:
+    """Google Ads exports show up as UTF-8 (with or without a BOM) or UTF-16
+    (with a BOM) depending on which download option was used."""
+    if raw.startswith(codecs.BOM_UTF16_LE) or raw.startswith(codecs.BOM_UTF16_BE):
+        return raw.decode("utf-16")
+    if raw.startswith(codecs.BOM_UTF8):
+        return raw.decode("utf-8-sig")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("utf-16")
+
+
+def _detect_delimiter(line: str) -> tuple[str, int]:
+    """Score a candidate delimiter by how many resulting columns match a known
+    Google Ads header name, so we can tell a comma-, tab-, or semicolon-
+    separated export apart without guessing blind."""
+    best_delim, best_score = ",", -1
+    for delim in (",", "\t", ";"):
+        cols = [c.strip().strip('"').lower() for c in line.split(delim)]
+        score = sum(1 for c in cols if c in _COLUMN_ALIASES)
+        if score > best_score:
+            best_delim, best_score = delim, score
+    return best_delim, best_score
+
+
+def _find_header(text: str) -> tuple[int, str]:
+    """Google Ads report downloads often prefix the real header with a title
+    line and a date-range line. Scan for the first line that looks like an
+    actual column header rather than assuming line 0 is it."""
+    lines = text.splitlines()
+    fallback = (0, ",")
+    for i, line in enumerate(lines):
+        if not line.strip():
+            continue
+        delim, score = _detect_delimiter(line)
+        if i == 0:
+            fallback = (0, delim)
+        if score >= 2:
+            return i, delim
+    return fallback
+
+
 def load_keyword_report(file_path: str) -> pd.DataFrame:
     """Read a keyword-performance CSV export and return a cleaned DataFrame."""
+    with open(file_path, "rb") as f:
+        raw = f.read()
+
+    text = _decode(raw)
+    if not text.strip():
+        return pd.DataFrame(columns=EXPECTED_COLUMNS)
+
+    header_idx, delim = _find_header(text)
+    body = "\n".join(text.splitlines()[header_idx:])
+
     try:
-        # utf-8-sig strips the BOM Google Ads exports prefix the file with.
-        df = pd.read_csv(file_path, encoding="utf-8-sig")
+        df = pd.read_csv(io.StringIO(body), sep=delim)
     except pd.errors.EmptyDataError:
         return pd.DataFrame(columns=EXPECTED_COLUMNS)
 
