@@ -53,12 +53,18 @@ def _render_form(error_html: str = "") -> str:
     return UPLOAD_FORM.replace("{{error_html}}", error_html)
 
 
-@app.route("/", methods=["GET"])
+@app.route("/", defaults={"_path": ""}, methods=["GET", "POST"])
+@app.route("/<path:_path>", methods=["GET", "POST"])
+def handle(_path):
+    if request.method == "GET":
+        return index()
+    return analyze()
+
+
 def index():
     return _render_form()
 
 
-@app.route("/", methods=["POST"])
 def analyze():
     uploaded = request.files.get("csv_file")
     if not uploaded or not uploaded.filename:
