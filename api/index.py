@@ -14,8 +14,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from flask import Flask, request
 
 from html_report import generate_empty_html_report, generate_html_report
-from parser import load_keyword_report
-from report import low_ctr_keywords, optimization_suggestions, wasted_spend_keywords
+from parser import load_ads_report
+from report import (
+    low_ctr_keywords,
+    optimization_suggestions,
+    optimization_suggestions_no_cost,
+    wasted_spend_keywords,
+    zero_conversion_keywords,
+)
 
 app = Flask(__name__)
 
@@ -37,7 +43,7 @@ UPLOAD_FORM = """<!doctype html>
 </head>
 <body>
   <h1>Ads Health Check</h1>
-  <p class="subtitle">Upload a Google Ads keyword-performance CSV export to get a report.</p>
+  <p class="subtitle">Upload a Google Ads keyword-performance or Performance Max search-category CSV export to get a report.</p>
   <form method="post" enctype="multipart/form-data">
     <input type="file" name="csv_file" accept=".csv" required>
     <br>
@@ -75,7 +81,7 @@ def analyze():
         tmp_path = tmp.name
 
     try:
-        df = load_keyword_report(tmp_path)
+        df, kind = load_ads_report(tmp_path)
     except (FileNotFoundError, ValueError) as e:
         return _render_form(f'<p class="error">{e}</p>')
     finally:
@@ -85,6 +91,10 @@ def analyze():
         return generate_empty_html_report(uploaded.filename)
 
     low_ctr_df = low_ctr_keywords(df)
-    wasted_df = wasted_spend_keywords(df)
-    suggestions = optimization_suggestions(df, low_ctr_df, wasted_df)
-    return generate_html_report(uploaded.filename, df, low_ctr_df, wasted_df, suggestions)
+    if kind == "keyword":
+        wasted_df = wasted_spend_keywords(df)
+        suggestions = optimization_suggestions(df, low_ctr_df, wasted_df)
+    else:
+        wasted_df = zero_conversion_keywords(df)
+        suggestions = optimization_suggestions_no_cost(df, low_ctr_df, wasted_df)
+    return generate_html_report(uploaded.filename, df, low_ctr_df, wasted_df, suggestions, kind)

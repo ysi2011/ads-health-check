@@ -29,7 +29,8 @@ def _esc(text) -> str:
     return html.escape(str(text))
 
 
-def _df_to_table(df: pd.DataFrame, formatters: dict) -> str:
+def _df_to_table(df: pd.DataFrame, formatters: dict | None = None) -> str:
+    formatters = formatters or {}
     headers = "".join(f"<th>{_esc(col)}</th>" for col in df.columns)
     rows = []
     for _, row in df.iterrows():
@@ -49,28 +50,57 @@ def generate_html_report(
     low_ctr_df: pd.DataFrame,
     wasted_df: pd.DataFrame,
     suggestions: list[str],
+    kind: str = "keyword",
 ) -> str:
-    """Build a standalone HTML page for the report. Assumes df is not empty."""
-    total_cost = df["Cost"].sum()
+    """Build a standalone HTML page for the report. Assumes df is not empty.
+
+    kind is "keyword" (per-keyword Search campaign export, has Cost) or
+    "category" (Performance Max search-term insights, no Cost).
+    """
+    is_keyword = kind == "keyword"
+    id_label = "Keyword" if is_keyword else "Search Category"
+    row_label = "keywords" if is_keyword else "search categories"
     total_conversions = int(df["Conversions"].sum())
 
     low_ctr_html = (
         '<p class="healthy">No issues found — this account is performing well.</p>'
         if low_ctr_df.empty
         else _df_to_table(
-            low_ctr_df[["Keyword", "CTR", "Impressions", "Clicks"]],
+            low_ctr_df[["Keyword", "CTR", "Impressions", "Clicks"]].rename(
+                columns={"Keyword": id_label}
+            ),
             {"CTR": "{:.2%}".format},
         )
     )
 
-    wasted_html = (
-        '<p class="healthy">No issues found — this account is performing well.</p>'
-        if wasted_df.empty
-        else _df_to_table(
-            wasted_df[["Keyword", "Cost", "Clicks", "Conversions"]],
-            {"Cost": "${:,.2f}".format},
+    if is_keyword:
+        wasted_html = (
+            '<p class="healthy">No issues found — this account is performing well.</p>'
+            if wasted_df.empty
+            else _df_to_table(
+                wasted_df[["Keyword", "Cost", "Clicks", "Conversions"]].rename(
+                    columns={"Keyword": id_label}
+                ),
+                {"Cost": "${:,.2f}".format},
+            )
         )
-    )
+        wasted_title = "Wasted Spend (clicks with zero conversions)"
+    else:
+        wasted_html = (
+            '<p class="healthy">No issues found — this account is performing well.</p>'
+            if wasted_df.empty
+            else _df_to_table(
+                wasted_df[["Keyword", "Clicks", "Impressions", "Conversions"]].rename(
+                    columns={"Keyword": id_label}
+                )
+            )
+        )
+        wasted_title = "Underperforming Categories (clicks with zero conversions)"
+
+    if is_keyword:
+        third_stat = f'<div class="stat"><span class="value">${_esc(f"{df["Cost"].sum():,.2f}")}</span><span class="label">Total Spend</span></div>'
+    else:
+        third_stat = f'<div class="stat"><span class="value">{_esc(f"{df["Clicks"].sum():,}")}</span><span class="label">Total Clicks</span></div>'
 
     suggestions_html = "".join(f"<li>{_esc(s)}</li>" for s in suggestions)
 
@@ -83,21 +113,21 @@ def generate_html_report(
 </head>
 <body>
   <h1>Ads Health Check</h1>
-  <p class="subtitle">{_esc(len(df))} keywords loaded from {_esc(source_file)}</p>
+  <p class="subtitle">{_esc(len(df))} {row_label} loaded from {_esc(source_file)}</p>
 
   <div class="summary">
-    <div class="stat"><span class="value">{_esc(len(df))}</span><span class="label">Keywords</span></div>
-    <div class="stat"><span class="value">${_esc(f"{total_cost:,.2f}")}</span><span class="label">Total Spend</span></div>
+    <div class="stat"><span class="value">{_esc(len(df))}</span><span class="label">{_esc(row_label.capitalize())}</span></div>
+    {third_stat}
     <div class="stat"><span class="value">{_esc(total_conversions)}</span><span class="label">Total Conversions</span></div>
   </div>
 
   <section>
-    <h2>Low CTR Keywords (ad relevance / targeting)</h2>
+    <h2>Low CTR {_esc(row_label.capitalize())} (ad relevance / targeting)</h2>
     {low_ctr_html}
   </section>
 
   <section>
-    <h2>Wasted Spend (clicks with zero conversions)</h2>
+    <h2>{_esc(wasted_title)}</h2>
     {wasted_html}
   </section>
 

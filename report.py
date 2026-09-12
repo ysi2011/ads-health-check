@@ -35,6 +35,16 @@ def wasted_spend_keywords(df: pd.DataFrame, min_cost: float = 0.0) -> pd.DataFra
     return flagged.sort_values("Cost", ascending=False).reset_index(drop=True)
 
 
+def zero_conversion_keywords(df: pd.DataFrame, min_clicks: int = 1) -> pd.DataFrame:
+    """Flag rows that got clicks but produced zero conversions.
+
+    Cost-free analog of wasted_spend_keywords, for reports (like Performance
+    Max search-term insights) that don't expose spend at this granularity.
+    """
+    flagged = df[(df["Conversions"] == 0) & (df["Clicks"] >= min_clicks)].copy()
+    return flagged.sort_values("Clicks", ascending=False).reset_index(drop=True)
+
+
 def optimization_suggestions(
     df: pd.DataFrame, low_ctr_df: pd.DataFrame, wasted_df: pd.DataFrame
 ) -> list[str]:
@@ -80,6 +90,62 @@ def optimization_suggestions(
         suggestions.append(
             f"\"{best['Keyword']}\" is your most efficient keyword at ${best['CPA']:,.2f} "
             f"per conversion. Consider increasing its budget or bid to capture more volume."
+        )
+
+    if not suggestions:
+        suggestions.append("No major issues found — this account looks healthy.")
+
+    return suggestions
+
+
+def optimization_suggestions_no_cost(
+    df: pd.DataFrame, low_ctr_df: pd.DataFrame, zero_conv_df: pd.DataFrame
+) -> list[str]:
+    """Same idea as optimization_suggestions, for reports with no Cost column
+    (e.g. Performance Max search-term insights) — clicks stand in for spend.
+    """
+    suggestions: list[str] = []
+
+    total_clicks = df["Clicks"].sum()
+    wasted_clicks = zero_conv_df["Clicks"].sum()
+
+    if wasted_clicks > 0:
+        pct = (wasted_clicks / total_clicks) * 100
+        suggestions.append(
+            f"{wasted_clicks:,} of {total_clicks:,} total clicks ({pct:.0f}%) went to "
+            f"search categories with zero conversions — that's the fastest place to "
+            f"tighten targeting."
+        )
+
+    if not zero_conv_df.empty:
+        worst = zero_conv_df.iloc[0]
+        suggestions.append(
+            f"\"{worst['Keyword']}\" got {int(worst['Clicks']):,} clicks with no "
+            f"conversions. Review its asset group's creative or exclude this category "
+            f"if it keeps underperforming."
+        )
+
+    if not low_ctr_df.empty:
+        weakest = low_ctr_df.iloc[0]
+        suggestions.append(
+            f"\"{weakest['Keyword']}\" has a CTR of {weakest['CTR']:.2%}, well below the "
+            f"account average of {df['CTR'].mean():.2%}. The creative or audience signals "
+            f"for this category may need work."
+        )
+        if len(low_ctr_df) > 1:
+            others = ", ".join(f'"{k}"' for k in low_ctr_df["Keyword"].iloc[1:4])
+            suggestions.append(
+                f"A few other categories are also under-clicking for the impressions "
+                f"they get: {others}. Worth a look at creative relevance for these too."
+            )
+
+    converting = df[df["Conversions"] > 0].copy()
+    if not converting.empty:
+        converting["ConvRate"] = converting["Conversions"] / converting["Clicks"]
+        best = converting.sort_values("ConvRate", ascending=False).iloc[0]
+        suggestions.append(
+            f"\"{best['Keyword']}\" converts best at a {best['ConvRate']:.1%} rate. "
+            f"Consider shifting more budget signal toward this category."
         )
 
     if not suggestions:

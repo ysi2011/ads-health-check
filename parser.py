@@ -1,25 +1,29 @@
-"""Loads a Google Ads keyword-performance CSV export into a pandas DataFrame."""
+"""Loads a Google Ads performance CSV export into a pandas DataFrame.
+
+Supports two report shapes:
+  - "keyword": a per-keyword Search campaign export (Keyword, Cost, Avg CPC, ...)
+  - "category": a Performance Max "Search terms insight" export (Search category,
+    ...), which Google doesn't expose Cost or Avg CPC for at this granularity.
+
+Both are normalized to the same identifier column, "Keyword", so the rest of
+the app (report.py, html_report.py) only needs to branch on `kind` where the
+missing Cost/Avg CPC data actually matters.
+"""
 
 import codecs
 import io
 
 import pandas as pd
 
-EXPECTED_COLUMNS = [
-    "Keyword",
-    "Clicks",
-    "Impressions",
-    "CTR",
-    "Avg CPC",
-    "Cost",
-    "Conversions",
-]
+CORE_COLUMNS = ["Keyword", "Clicks", "Impressions", "CTR", "Conversions"]
+COST_COLUMNS = ["Avg CPC", "Cost"]
 
 # Google Ads spells these differently depending on where in the UI you export
-# from (e.g. "Avg. CPC" with a period, "Search keyword" instead of "Keyword").
+# from (e.g. "Avg. CPC" with a period, "Search category" for Performance Max).
 _COLUMN_ALIASES = {
     "keyword": "Keyword",
     "search keyword": "Keyword",
+    "search category": "Keyword",
     "clicks": "Clicks",
     "impressions": "Impressions",
     "impr.": "Impressions",
@@ -94,14 +98,18 @@ def _find_header(text: str) -> tuple[int, str]:
     return fallback
 
 
-def load_keyword_report(file_path: str) -> pd.DataFrame:
-    """Read a keyword-performance CSV export and return a cleaned DataFrame."""
+def load_ads_report(file_path: str) -> tuple[pd.DataFrame, str]:
+    """Read a Google Ads performance CSV export.
+
+    Returns (df, kind) where kind is "keyword" (Cost/Avg CPC available) or
+    "category" (Performance Max search-term insights; no cost data).
+    """
     with open(file_path, "rb") as f:
         raw = f.read()
 
     text = _decode(raw)
     if not text.strip():
-        return pd.DataFrame(columns=EXPECTED_COLUMNS)
+        return pd.DataFrame(columns=CORE_COLUMNS), "keyword"
 
     header_idx, delim = _find_header(text)
     body = "\n".join(text.splitlines()[header_idx:])
@@ -109,25 +117,29 @@ def load_keyword_report(file_path: str) -> pd.DataFrame:
     try:
         df = pd.read_csv(io.StringIO(body), sep=delim)
     except pd.errors.EmptyDataError:
-        return pd.DataFrame(columns=EXPECTED_COLUMNS)
+        return pd.DataFrame(columns=CORE_COLUMNS), "keyword"
 
     df = _normalize_columns(df)
 
-    missing = [col for col in EXPECTED_COLUMNS if col not in df.columns]
+    missing = [col for col in CORE_COLUMNS if col not in df.columns]
     if missing:
         raise ValueError(
-            f"This doesn't look like a Google Ads keyword export — "
+            f"This doesn't look like a Google Ads keyword or search-category export — "
             f"missing column(s): {', '.join(missing)}"
         )
 
+    kind = "keyword" if "Cost" in df.columns and "Avg CPC" in df.columns else "category"
+
     if df.empty:
-        return df
+        return df, kind
 
     # Google Ads appends a "Total: Search ..." summary row at the bottom.
     df = df[~df["Keyword"].astype(str).str.startswith("Total", na=False)]
 
-    for col in _NUMERIC_COLUMNS:
+    numeric_cols = CORE_COLUMNS[1:] + (COST_COLUMNS if kind == "keyword" else [])
+    for col in numeric_cols:
         df[col] = _to_number(df[col])
     df["CTR"] = df["CTR"] / 100
 
-    return df.reset_index(drop=True)
+    keep_cols = CORE_COLUMNS + (COST_COLUMNS if kind == "keyword" else [])
+    return df[keep_cols].reset_index(drop=True), kind

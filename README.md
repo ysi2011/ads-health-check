@@ -1,16 +1,29 @@
 # Ads Health Check
 
-A read-only CLI tool that summarizes Google Ads keyword performance for a car
+A read-only CLI tool that summarizes Google Ads performance for a car
 dealership client and flags plain-English optimization opportunities.
 
-Point it at a keyword-performance CSV export and it reports:
+Point it at a Google Ads CSV export and it reports:
 
-- **Low CTR keywords** — impressions that aren't turning into clicks (an ad
-  relevance / targeting problem)
-- **Wasted spend** — clicks that are costing money but producing zero
-  conversions (a cost efficiency problem)
+- **Low CTR keywords / search categories** — impressions that aren't turning
+  into clicks (an ad relevance / targeting problem)
+- **Wasted spend / underperforming categories** — clicks that are producing
+  zero conversions (a cost efficiency problem where cost data is available,
+  or a targeting-efficiency problem where it isn't)
 - **Optimization suggestions** — plain-English recommendations generated
   from the flagged data above
+
+Two report shapes are supported:
+
+- A **per-keyword Search campaign export** (`Keyword, Clicks, Impressions,
+  CTR, Avg CPC, Cost, Conversions`) — the full analysis, including
+  dollar-based wasted spend.
+- A **Performance Max "Search terms insight" export** (`Search category,
+  Clicks, Impressions, CTR, Conversions, ...`) — Google doesn't expose Cost
+  or Avg CPC at this granularity for Performance Max, so the tool falls back
+  to a clicks-based version of the same flags instead.
+
+The tool auto-detects which one you've uploaded from the CSV's columns.
 
 ## Setup
 
@@ -38,18 +51,19 @@ python main.py --file sample_data.csv --output report.txt
 
 ### Flags
 
-| Flag       | Required | Description                                        |
-|------------|----------|-----------------------------------------------------|
-| `--file`   | yes      | Path to a Google Ads keyword-performance CSV export |
-| `--output` | no       | Also save the printed report to this file           |
+| Flag       | Required | Description                             |
+|------------|----------|------------------------------------------|
+| `--file`   | yes      | Path to a Google Ads CSV export           |
+| `--output` | no       | Also save the printed report to this file |
 
 ### Expected CSV columns
 
-`Keyword, Clicks, Impressions, CTR, Avg CPC, Cost, Conversions`
+- Keyword report: `Keyword, Clicks, Impressions, CTR, Avg CPC, Cost, Conversions`
+- Performance Max search-category report: `Search category, Clicks, Impressions, CTR, Conversions`
 
-`sample_data.csv` is included as a small fake dataset for testing without
-real client data. `empty_sample.csv` (headers only, no rows) is included to
-demo the empty-report edge case.
+`sample_data.csv` is included as a small fake keyword dataset for testing
+without real client data. `empty_sample.csv` (headers only, no rows) is
+included to demo the empty-report edge case.
 
 ## Example output
 
@@ -92,9 +106,11 @@ Optimization Suggestions
 
 ```
 main.py           # CLI entry point (argument parsing, prints the report)
-parser.py         # Reads and cleans the CSV into a pandas DataFrame
+api/index.py      # Flask web entry point (Vercel serverless function)
+parser.py         # Reads and cleans the CSV into a pandas DataFrame; detects report kind
 report.py         # Core logic: low-CTR flagging, wasted-spend detection, suggestions
-requirements.txt  # pandas
+html_report.py    # Renders the web report as a standalone HTML page
+requirements.txt  # pandas, flask
 sample_data.csv   # Fake keyword export for testing
 empty_sample.csv  # Headers-only CSV for testing the empty-report edge case
 ```
